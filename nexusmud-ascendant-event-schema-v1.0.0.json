@@ -1,0 +1,596 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nexusmud.internal/schemas/ascendant-event.json",
+  "title": "AscendantEvent",
+  "description": "Envelope schema for all AscendantEvent types ingested by the Maker Chronicle pipeline. Every event type shares the base fields; domain-specific payload is carried in the 'payload' object and validated against the referenced sub-schema.",
+  "version": "1.0.0",
+  "x-nexusmud-owner": "Prime Architect — Cody",
+  "x-nexusmud-review-status": "DRAFT — INTERNAL ONLY",
+  "x-nexusmud-created": "2026-06-10",
+  "type": "object",
+  "required": [
+    "eventId",
+    "eventType",
+    "domain",
+    "makerId",
+    "timestamp",
+    "payload",
+    "attributionMode"
+  ],
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "pattern": "^asc-evt-[0-9]{4,8}$",
+      "description": "Unique AscendantEvent identifier. Format: asc-evt-NNNN (zero-padded to at least 4 digits).",
+      "examples": ["asc-evt-9921", "asc-evt-0042"]
+    },
+    "eventType": {
+      "type": "string",
+      "enum": [
+        "AREA_CREATED",
+        "AREA_MODIFIED",
+        "AREA_DELETED",
+        "POWER_FORGE",
+        "ITEM_CREATED",
+        "ITEM_MODIFIED",
+        "ITEM_DELETED",
+        "BOSS_SPAWN",
+        "ENTITY_CREATED",
+        "ENTITY_MODIFIED",
+        "ENTITY_DELETED",
+        "LORE_ENTRY",
+        "LORE_REVISED",
+        "LORE_REDACTED",
+        "CALIBRATION",
+        "SYSTEM_MODIFIED",
+        "SYSTEM_CREATED",
+        "FACTION_CREATED",
+        "FACTION_MODIFIED",
+        "QUEST_CREATED",
+        "QUEST_MODIFIED",
+        "NPC_CREATED",
+        "NPC_MODIFIED"
+      ],
+      "description": "The type of world-state change that triggered this event. Maps to a Divine Domain and Chronicle blurb template."
+    },
+    "domain": {
+      "type": "string",
+      "enum": ["Weave", "Forge", "Genesis", "Chronicle", "Clockwork"],
+      "description": "The Divine Domain to which this event belongs. Used to route the event to the correct Chronicle blurb template and curator queue."
+    },
+    "makerId": {
+      "type": "string",
+      "pattern": "^mk-[0-9]{4}-[a-z0-9]{2,16}$",
+      "description": "Unique maker (God Mode account) identifier. Format: mk-NNNN-slug. Present on all events; attribution display is governed by attributionMode.",
+      "examples": ["mk-0041-ares", "mk-0007-veln"]
+    },
+    "attributionMode": {
+      "type": "string",
+      "enum": ["public", "pseudonymous", "anonymous"],
+      "description": "How the maker's identity should appear in player-facing Chronicle output. 'public' = real epithet shown; 'pseudonymous' = epithet shown but makerId hidden; 'anonymous' = no maker information surfaced."
+    },
+    "makerEpithet": {
+      "type": "string",
+      "maxLength": 80,
+      "description": "Display name or pseudonym for this maker. Required when attributionMode is 'public' or 'pseudonymous'. Omit or null when 'anonymous'.",
+      "nullable": true,
+      "examples": ["The Pale Shaper", "Archmage Dren", "The Unseen Hand"]
+    },
+    "sigilAsset": {
+      "type": "string",
+      "description": "Asset pipeline reference ID for the maker's sigil. Optional. Omitted if attributionMode is 'anonymous'.",
+      "nullable": true,
+      "examples": ["sigil_arc_pale_01", "sigil_forge_77"]
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC timestamp of when the event was created in the God Mode system.",
+      "examples": ["2026-06-10T06:14:00Z"]
+    },
+    "schemaVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "default": "1.0.0",
+      "description": "Schema version used to validate this event. Defaults to current version if omitted. Used by the ingestion pipeline to apply the correct validation rules."
+    },
+    "groundTruthRef": {
+      "type": "string",
+      "description": "Reference ID for the corresponding GroundTruth API record. Used to fetch authoritative world-state data during Chronicle entry creation.",
+      "nullable": true,
+      "examples": ["gt-area-stormfall-001", "gt-item-sundering-42"]
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 40
+      },
+      "maxItems": 20,
+      "uniqueItems": true,
+      "description": "Optional pre-assigned tags from the God Mode system. Chronicle curators may add or remove tags during curation.",
+      "examples": [["area", "dungeon", "genesis", "storm"]]
+    },
+    "payload": {
+      "type": "object",
+      "description": "Domain- and eventType-specific data payload. Structure is governed by the eventType. See sub-schemas below ('$defs') for each event type's payload shape.",
+      "discriminator": {
+        "propertyName": "eventType"
+      },
+      "oneOf": [
+        { "$ref": "#/$defs/AreaPayload" },
+        { "$ref": "#/$defs/ForgePayload" },
+        { "$ref": "#/$defs/EntityPayload" },
+        { "$ref": "#/$defs/LorePayload" },
+        { "$ref": "#/$defs/CalibrationPayload" },
+        { "$ref": "#/$defs/GenericPayload" }
+      ]
+    },
+    "moderationHooks": {
+      "type": "object",
+      "description": "Optional moderation metadata injected by the God Mode system at event creation. Can pre-flag events for expedited or restricted review.",
+      "properties": {
+        "autoFlag": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, the ingestion pipeline immediately routes this event to the moderation queue rather than the curator draft queue."
+        },
+        "flagReason": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Reason for auto-flagging. Required when autoFlag is true.",
+          "nullable": true
+        },
+        "restrictedAccess": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, the resulting Chronicle entry is visible only to curators and moderators until explicitly published."
+        },
+        "priorityLevel": {
+          "type": "string",
+          "enum": ["normal", "elevated", "urgent"],
+          "default": "normal",
+          "description": "Queue priority for curation assignment. 'urgent' bypasses normal round-robin and notifies senior curator."
+        }
+      },
+      "additionalProperties": false
+    },
+    "ingestionMeta": {
+      "type": "object",
+      "description": "Internal metadata added by the Chronicle ingestion pipeline. Not set by the God Mode system — populated by the pipeline on receipt.",
+      "properties": {
+        "receivedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when the event was received by the Chronicle ingestion pipeline."
+        },
+        "ingestedBy": {
+          "type": "string",
+          "description": "Service or process identifier that ingested this event."
+        },
+        "chronicleEntryId": {
+          "type": "string",
+          "description": "The Chronicle entry ID assigned after successful ingestion. Null until ingestion completes.",
+          "nullable": true
+        },
+        "ingestionStatus": {
+          "type": "string",
+          "enum": ["PENDING", "INGESTED", "FAILED", "DUPLICATE"],
+          "description": "Current ingestion pipeline status for this event."
+        },
+        "validationErrors": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "List of validation errors encountered during ingestion. Empty array if valid."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "AreaPayload": {
+      "$anchor": "AreaPayload",
+      "title": "AreaPayload",
+      "description": "Payload for AREA_CREATED, AREA_MODIFIED, AREA_DELETED events. Domain: Genesis.",
+      "type": "object",
+      "required": ["areaId", "areaName", "action"],
+      "properties": {
+        "areaId": {
+          "type": "string",
+          "description": "Unique area identifier in the world-state.",
+          "examples": ["area-stormfall-001"]
+        },
+        "areaName": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Display name of the created or modified area.",
+          "examples": ["Stormfall Reach"]
+        },
+        "action": {
+          "type": "string",
+          "enum": ["CREATED", "MODIFIED", "DELETED"]
+        },
+        "accessTier": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "description": "Recommended player tier for accessing this area.",
+          "examples": [3]
+        },
+        "coordinates": {
+          "type": "object",
+          "properties": {
+            "x": { "type": "number" },
+            "y": { "type": "number" },
+            "z": { "type": "number" }
+          },
+          "description": "World-space coordinates of the area anchor point."
+        },
+        "ecology": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Brief description of the area's ecology, populated by the Genesis system.",
+          "nullable": true
+        },
+        "boundaryLayerStatus": {
+          "type": "string",
+          "enum": ["STABLE", "FORMING", "UNSTABLE", "COLLAPSED"],
+          "description": "State of the Genesis boundary layer at event time."
+        },
+        "linkedEntities": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Entity IDs of bosses, NPCs, or spawns seeded in this area at creation time."
+        }
+      },
+      "additionalProperties": true
+    },
+    "ForgePayload": {
+      "$anchor": "ForgePayload",
+      "title": "ForgePayload",
+      "description": "Payload for POWER_FORGE, ITEM_CREATED, ITEM_MODIFIED, ITEM_DELETED events. Domain: Forge.",
+      "type": "object",
+      "required": ["itemId", "itemName", "action", "forgeLocation"],
+      "properties": {
+        "itemId": {
+          "type": "string",
+          "description": "Unique item identifier in the world-state.",
+          "examples": ["item-sundering-blade-42"]
+        },
+        "itemName": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Display name of the forged item.",
+          "examples": ["The Sundering Blade"]
+        },
+        "action": {
+          "type": "string",
+          "enum": ["CREATED", "MODIFIED", "DELETED", "FORGED"]
+        },
+        "forgeLocation": {
+          "type": "string",
+          "description": "Location where the forging took place.",
+          "examples": ["The Deep Crucible, Ashvein Mountains"]
+        },
+        "materials": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["materialId", "materialName", "quantity"],
+            "properties": {
+              "materialId": { "type": "string" },
+              "materialName": { "type": "string" },
+              "quantity": { "type": "integer", "minimum": 1 },
+              "sourceLocation": { "type": "string", "nullable": true }
+            }
+          },
+          "description": "List of materials consumed in the forging process."
+        },
+        "resonanceRating": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10,
+          "description": "Forge domain resonance rating assigned by the system.",
+          "examples": [8.7]
+        },
+        "itemClass": {
+          "type": "string",
+          "enum": ["weapon", "armor", "artifact", "reagent", "relic", "tool", "token"],
+          "description": "Broad item classification."
+        },
+        "isUnique": {
+          "type": "boolean",
+          "default": false,
+          "description": "True if this item is a unique, non-replicable artifact."
+        },
+        "replicationStatus": {
+          "type": "string",
+          "enum": ["UNREPLICABLE", "RESTRICTED", "OPEN"],
+          "description": "Whether other makers can attempt to replicate this item's forging process."
+        }
+      },
+      "additionalProperties": true
+    },
+    "EntityPayload": {
+      "$anchor": "EntityPayload",
+      "title": "EntityPayload",
+      "description": "Payload for BOSS_SPAWN, ENTITY_CREATED, ENTITY_MODIFIED, ENTITY_DELETED, NPC_CREATED, NPC_MODIFIED events. Domain: Genesis or Weave.",
+      "type": "object",
+      "required": ["entityId", "entityName", "action", "spawnLocation"],
+      "properties": {
+        "entityId": {
+          "type": "string",
+          "description": "Unique entity identifier.",
+          "examples": ["entity-hungering-veil-01"]
+        },
+        "entityName": {
+          "type": "string",
+          "maxLength": 120,
+          "examples": ["The Hungering Veil"]
+        },
+        "action": {
+          "type": "string",
+          "enum": ["SPAWNED", "CREATED", "MODIFIED", "DELETED", "DEFEATED", "DORMANT"]
+        },
+        "entityType": {
+          "type": "string",
+          "enum": ["boss", "elite", "npc", "ambient", "construct", "spirit"]
+        },
+        "tier": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "description": "Combat tier / challenge rating.",
+          "examples": [5]
+        },
+        "spawnLocation": {
+          "type": "string",
+          "description": "World-state location identifier where the entity spawned.",
+          "examples": ["Stormfall Reach — Inner Veil Chamber"]
+        },
+        "respawnCycleSecs": {
+          "type": "integer",
+          "nullable": true,
+          "description": "Respawn cycle in seconds. Null if entity does not respawn.",
+          "examples": [86400]
+        },
+        "associatedDrops": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Item IDs that can drop from this entity.",
+          "examples": [["item-veil-shard-rare", "item-encounter-charter-01"]]
+        },
+        "loreClassification": {
+          "type": "string",
+          "enum": ["CLASSIFIED", "PUBLIC", "RESTRICTED", "LEGEND"],
+          "description": "How the entity is classified in the Chronicle lore system."
+        }
+      },
+      "additionalProperties": true
+    },
+    "LorePayload": {
+      "$anchor": "LorePayload",
+      "title": "LorePayload",
+      "description": "Payload for LORE_ENTRY, LORE_REVISED, LORE_REDACTED events. Domain: Chronicle.",
+      "type": "object",
+      "required": ["loreId", "loreName", "action", "sourceWeight"],
+      "properties": {
+        "loreId": {
+          "type": "string",
+          "description": "Unique lore record identifier.",
+          "examples": ["lore-ashen-compact-001"]
+        },
+        "loreName": {
+          "type": "string",
+          "maxLength": 120,
+          "examples": ["The Ashen Compact"]
+        },
+        "action": {
+          "type": "string",
+          "enum": ["CREATED", "REVISED", "REDACTED", "CANONIZED"]
+        },
+        "sourceWeight": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Epistemic weight (0.0–1.0) assigned by the Chronicle Accounting committee.",
+          "examples": [0.85]
+        },
+        "canonStatus": {
+          "type": "string",
+          "enum": ["CANON", "NON_CANON", "DISPUTED", "PENDING"],
+          "description": "Current canonization flag for this lore record."
+        },
+        "primarySources": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "List of primary source IDs cited in this lore entry."
+        },
+        "disputedClaims": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Free-text list of claims currently under dispute."
+        },
+        "accessLevel": {
+          "type": "string",
+          "enum": ["public", "scholar", "elder", "restricted"],
+          "description": "Who can read this lore entry in the Chronicle."
+        }
+      },
+      "additionalProperties": true
+    },
+    "CalibrationPayload": {
+      "$anchor": "CalibrationPayload",
+      "title": "CalibrationPayload",
+      "description": "Payload for CALIBRATION, SYSTEM_MODIFIED, SYSTEM_CREATED events. Domain: Clockwork.",
+      "type": "object",
+      "required": ["systemId", "systemName", "action", "calibrationId"],
+      "properties": {
+        "systemId": {
+          "type": "string",
+          "description": "Unique system identifier in the Clockwork domain.",
+          "examples": ["sys-gravetide-engine-001"]
+        },
+        "systemName": {
+          "type": "string",
+          "maxLength": 120,
+          "examples": ["Gravetide Engine"]
+        },
+        "action": {
+          "type": "string",
+          "enum": ["CALIBRATED", "CREATED", "MODIFIED", "SUSPENDED", "TERMINATED"]
+        },
+        "calibrationId": {
+          "type": "string",
+          "description": "Unique calibration record identifier.",
+          "examples": ["cal-gravetide-044"]
+        },
+        "cycleId": {
+          "type": "integer",
+          "description": "The Clockwork cycle number during which this calibration occurred.",
+          "examples": [44]
+        },
+        "toleranceBand": {
+          "type": "object",
+          "required": ["min", "max", "unit"],
+          "properties": {
+            "min": { "type": "number" },
+            "max": { "type": "number" },
+            "unit": { "type": "string" }
+          },
+          "description": "Acceptable tolerance band for the calibrated metric."
+        },
+        "postCalibrationMetrics": {
+          "type": "object",
+          "additionalProperties": { "type": "number" },
+          "description": "Key-value map of metric name to post-calibration value.",
+          "examples": [{ "drift_pct": 0.003, "cycle_integrity": 99.997 }]
+        },
+        "openFlags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Calibration flags remaining open after this intervention.",
+          "examples": [["flag-secondary-resonance", "flag-failsafe-F3"]]
+        },
+        "failsafeStatus": {
+          "type": "string",
+          "enum": ["ARMED", "TRIGGERED", "DISARMED", "BYPASSED"],
+          "description": "State of the primary failsafe at end of calibration."
+        }
+      },
+      "additionalProperties": true
+    },
+    "GenericPayload": {
+      "$anchor": "GenericPayload",
+      "title": "GenericPayload",
+      "description": "Fallback payload for event types not covered by a domain-specific payload schema (e.g., QUEST_CREATED, FACTION_CREATED). Accepts any additional properties.",
+      "type": "object",
+      "required": ["summary"],
+      "properties": {
+        "summary": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Human-readable summary of the event payload, for Chronicle ingestion fallback."
+        },
+        "refIds": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Any relevant world-state reference IDs associated with this event."
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "examples": [
+    {
+      "eventId": "asc-evt-9921",
+      "eventType": "AREA_CREATED",
+      "domain": "Genesis",
+      "makerId": "mk-0041-ares",
+      "attributionMode": "pseudonymous",
+      "makerEpithet": "The Pale Shaper",
+      "sigilAsset": "sigil_arc_pale_01",
+      "timestamp": "2026-06-10T06:14:00Z",
+      "schemaVersion": "1.0.0",
+      "groundTruthRef": "gt-area-stormfall-001",
+      "tags": ["area", "dungeon", "genesis", "storm", "tier-3"],
+      "payload": {
+        "areaId": "area-stormfall-001",
+        "areaName": "Stormfall Reach",
+        "action": "CREATED",
+        "accessTier": 3,
+        "coordinates": { "x": 44.7, "y": -12.3, "z": 0 },
+        "ecology": "Storm-touched fauna, perpetual electrical storms, basalt spire formations.",
+        "boundaryLayerStatus": "STABLE",
+        "linkedEntities": ["entity-hungering-veil-01"]
+      },
+      "moderationHooks": {
+        "autoFlag": false,
+        "restrictedAccess": false,
+        "priorityLevel": "normal"
+      }
+    },
+    {
+      "eventId": "asc-evt-9844",
+      "eventType": "POWER_FORGE",
+      "domain": "Forge",
+      "makerId": "mk-0019-volkar",
+      "attributionMode": "anonymous",
+      "makerEpithet": null,
+      "sigilAsset": null,
+      "timestamp": "2026-06-09T22:47:00Z",
+      "schemaVersion": "1.0.0",
+      "groundTruthRef": "gt-item-sundering-42",
+      "tags": ["item", "legendary", "forge", "weapon", "unique"],
+      "payload": {
+        "itemId": "item-sundering-blade-42",
+        "itemName": "The Sundering Blade",
+        "action": "FORGED",
+        "forgeLocation": "The Deep Crucible, Ashvein Mountains",
+        "materials": [
+          { "materialId": "mat-veldrite-shard", "materialName": "Veldrite Shard", "quantity": 7, "sourceLocation": "Ashvein Deep Seam" }
+        ],
+        "resonanceRating": 8.7,
+        "itemClass": "weapon",
+        "isUnique": true,
+        "replicationStatus": "UNREPLICABLE"
+      },
+      "moderationHooks": {
+        "autoFlag": false,
+        "restrictedAccess": false,
+        "priorityLevel": "elevated"
+      }
+    },
+    {
+      "eventId": "asc-evt-9901",
+      "eventType": "BOSS_SPAWN",
+      "domain": "Genesis",
+      "makerId": "mk-0041-ares",
+      "attributionMode": "pseudonymous",
+      "makerEpithet": "The Pale Shaper",
+      "sigilAsset": "sigil_arc_pale_01",
+      "timestamp": "2026-06-05T03:30:00Z",
+      "schemaVersion": "1.0.0",
+      "groundTruthRef": "gt-entity-hungering-veil-01",
+      "tags": ["boss", "entity", "genesis", "tier-5", "weave"],
+      "payload": {
+        "entityId": "entity-hungering-veil-01",
+        "entityName": "The Hungering Veil",
+        "action": "SPAWNED",
+        "entityType": "boss",
+        "tier": 5,
+        "spawnLocation": "Stormfall Reach — Inner Veil Chamber",
+        "respawnCycleSecs": 86400,
+        "associatedDrops": ["item-veil-shard-rare", "item-encounter-charter-01", "item-pale-shaper-warning"],
+        "loreClassification": "LEGEND"
+      },
+      "moderationHooks": {
+        "autoFlag": true,
+        "flagReason": "Tier-5 boss spawn requires senior curator review before publication.",
+        "restrictedAccess": true,
+        "priorityLevel": "urgent"
+      }
+    }
+  ]
+}
